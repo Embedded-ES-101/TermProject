@@ -13,34 +13,59 @@
 
 int sw[4] = {4,17,27,22};
 int led[4] = {23, 24, 25, 1};
-int flag = 0;
-int led_flag[4];
+int mode1_flag = 0; // mode1 led flag
+int led_number; // mode2 led flag
+//int mode2_flag[4];
+int led_flag[4]; // mode flag 어떤 모드가 켜져있나?
 static struct timer_list timer;
 
+irqreturn_t irq_handler(int irq, void *dev_id);
+static int is_on_led_flag(void);
+
+static void timer_cb_mode1(struct timer_list *timer);
+static int timer_module_init_mode1(void);
 static void module_led_mode_1(void);
+
+static void timer_cb_mode2(struct timer_list *timer);
+static int timer_module_init_mode2(void);
+static void module_led_mode_2(void);
+
+
 static void module_led_mode_4(void);
 
-static void timer_cb(struct timer_list *timer)
+int is_on_led_flag(void)
+{
+	int i;
+	for (i = 0; i < 3; i++)
+	{
+		if (led_flag[i])
+			return 1;
+	}
+	return 0;
+}
+
+#pragma region module_led_mode_1
+static void timer_cb_mode1(struct timer_list *timer)
 {
 	int ret,i;
 	printk(KERN_INFO "timer callback function ! \n");
-	if(flag == 0){
+	if(mode1_flag == 0){
 		for(i=0;i<4;i++){
 			ret = gpio_direction_output(led[i], HIGH);
 		}
-		flag=1;
+		mode1_flag=1;
 	}
 	else{
 		for(i=0;i<4;i++){
 			ret = gpio_direction_output(led[i], LOW);
 		}
-		flag=0;
+		mode1_flag=0;
 	}
 	timer->expires = jiffies + HZ * 2;
 	add_timer(timer);
 }
 
-static int timer_module_init(void)
+static int timer_module_init_mode1(void)
 {
 	int ret,i;
 	printk(KERN_INFO "led_module_init!\n");
@@ -49,22 +74,101 @@ static int timer_module_init(void)
 		if(ret<0)
 			printk(KERN_INFO "led_module gpio request failed!\n");
 	}
-	timer_setup(&timer, timer_cb, 0);
+	timer_setup(&timer, timer_cb_mode1, 0);
 	timer.expires = jiffies + HZ * 2;
 	add_timer(&timer);
 	return 0;
 }
 
-
 static void module_led_mode_1(void)
 {
-	if (led_flag[0])
+	if (is_on_led_flag())
 		return;
-	timer_module_init();
+
 	led_flag[0] = 1;
+    int ret, i;
+    if(mode1_flag == 0){
+		for(i=0;i<4;i++){
+			ret = gpio_direction_output(led[i], HIGH);
+		}
+		mode1_flag=1;
+	}
+
+	timer_module_init_mode1();
+}
+#pragma endregion
+
+#pragma region module_led_mode_2
+static void timer_cb_mode2(struct timer_list *timer)
+{
+	int ret;
+
+    ret = gpio_direction_output(led[led_number], HIGH);
+    ret = gpio_direction_output(led[(led_number + 4 - 1) % 4], LOW);
+
+    led_number = (led_number + 1) % 4;
+	timer->expires = jiffies + HZ * 2;
+	add_timer(timer);
 }
 
-irqreturn_t irq_handler(int irq, void *dev_id){
+static int timer_module_init_mode2(void)
+{
+	int ret,i;
+	printk(KERN_INFO "led_module_init!\n");
+	for(i=0;i<4;i++){
+		ret = gpio_request(led[i], "LED");
+		if(ret<0)
+			printk(KERN_INFO "led_module gpio request failed!\n");
+	}
+	timer_setup(&timer, timer_cb_mode2, 0);
+	timer.expires = jiffies + HZ * 2;
+	add_timer(&timer);
+	return 0;
+}
+
+static void module_led_mode_2(void)
+{
+	if (is_on_led_flag())
+		return;
+	led_flag[1] = 1;
+
+	timer_module_init_mode2();
+}
+#pragma endregion
+
+static void module_led_mode_4(void)
+{
+	int ret, i;
+	printk(KERN_INFO "mode4 stop!\n");
+
+	if (led_flag[0]) // 1번 led
+	{
+        if (mode1_flag)
+        {
+            for(i=0;i<4;i++){
+			    ret = gpio_direction_output(led[i], LOW);
+            }
+            mode1_flag = 0;
+		}
+
+		del_timer(&timer);
+		led_flag[0] = 0;
+	}
+
+    else if (led_flag[1]) // 2번 led
+    {
+        for(i=0;i<4;i++){
+			ret = gpio_direction_output(led[i], LOW);
+        }
+
+        led_number = 0;
+        del_timer(&timer);
+		led_flag[1] = 0;
+    }
+}
+
+irqreturn_t irq_handler(int irq, void *dev_id)
+{
 	printk(KERN_INFO "Debug %d\n", irq);
 	switch(irq){
 		case 60:
@@ -73,6 +177,7 @@ irqreturn_t irq_handler(int irq, void *dev_id){
 			break;
 		case 61:
 			printk(KERN_INFO "sw2 interrupt ocurred!\n");
+            module_led_mode_2();
 			break;
 		case 62:
 			printk(KERN_INFO "sw3 interrupt ocurred!\n");
@@ -83,26 +188,6 @@ irqreturn_t irq_handler(int irq, void *dev_id){
 			break;
 	}
 	return 0;
-}
-
-static void module_led_mode_4(void)
-{
-	int ret, i;
-	printk(KERN_INFO "mode4 stop!\n");
-
-	if (led_flag[0]) // 1번 led
-	{
-        if (flag)
-        {
-            for(i=0;i<4;i++){
-			    ret = gpio_direction_output(led[i], LOW);
-            }
-            flag = 0;
-		}
-
-		del_timer(&timer);
-		led_flag[0] = 0;
-	}
 }
 
 static int switch_interrupt_init(void){
