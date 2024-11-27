@@ -14,6 +14,7 @@
 int sw[4] = {4,17,27,22};
 int led[4] = {23, 24, 25, 1};
 int flag = 0;
+int led_flag[4];
 static struct timer_list timer;
 
 static void module_led_mode_1(void);
@@ -57,11 +58,10 @@ static int timer_module_init(void)
 
 static void module_led_mode_1(void)
 {
+	if (led_flag[0])
+		return;
 	timer_module_init();
-	// while(1)
-	// {
-
-	// }
+	led_flag[0] = 1;
 }
 
 irqreturn_t irq_handler(int irq, void *dev_id){
@@ -87,25 +87,21 @@ irqreturn_t irq_handler(int irq, void *dev_id){
 
 static void module_led_mode_4(void)
 {
-	int i;
+	int ret, i;
 	printk(KERN_INFO "mode4 stop!\n");
-	del_timer(&timer);
-	for(i=0;i<4;i++){
-		free_irq(gpio_to_irq(sw[i]),(void *)(irq_handler));
-		gpio_free(sw[i]);
-		gpio_free(led[i]);
-	}
 
-	int ret;
-	int res;
-	for(i=0;i<4;i++){
-		ret = gpio_request(led[i], "LED");
-		if(ret<0)
-			printk(KERN_INFO "led_module gpio request failed!\n");
-		res = gpio_request(sw[i],"sw");
-		res = request_irq(gpio_to_irq(sw[i]),(irq_handler_t)irq_handler,IRQF_TRIGGER_RISING,"IRQ",(void *)(irq_handler));
-		if(res<0)
-			printk(KERN_INFO "led_module gpio request failed!\n");
+	if (led_flag[0]) // 1번 led
+	{
+        if (flag)
+        {
+            for(i=0;i<4;i++){
+			    ret = gpio_direction_output(led[i], LOW);
+            }
+            flag = 0;
+		}
+
+		del_timer(&timer);
+		led_flag[0] = 0;
 	}
 }
 
