@@ -194,8 +194,6 @@ static void module_led_mode_3(void)
 	if (is_on_led_flag())
 		return;
 	led_flag[2] = 1;
-
-	timer_module_init_mode3();
 }
 
 #pragma endregion
