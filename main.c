@@ -1,51 +1,78 @@
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/interrupt.h>
-#include <linux/delay.h>
-#include <linux/gpio.h>
-#include <linux/timer.h>
-#include <asm/uaccess.h>
-#include <asm/io.h>
+#include "main.h"
 
-#define HIGH 1
-#define LOW 0
+static ssize_t my_driver_write(struct file *file, const char *buf, size_t length, loff_t *ofs)
+{
+    ssize_t retval;
+    printk(KERN_INFO "simple_buffer_write!\n");
+    if (length > BUF_SIZE) {
+        retval = -ENOMEM;
+        return retval;
+    }
+    cur_len = retval = length;
+    if (copy_from_user(memory_buffer, buf, retval)) {
+        retval = -EFAULT;
+        return retval;
+    }
+    printk(KERN_INFO "drv_buffer_write: [%zu bytes written]\n", retval);
+	user_interface_handler(); // 유저 입력으로 LED 제어
+    return retval;
+}
 
-#define MODE3_FLAG1 (1 << 0)  // 0000 0001
-#define MODE3_FLAG2 (1 << 1)  // 0000 0010 
-#define MODE3_FLAG3 (1 << 2)  // 0000 0100
-#define MODE3_FLAG4 (1 << 3)  // 0000 1000
+static ssize_t my_driver_read(struct file *file, char *buf, size_t length, loff_t *ofs)
+{
+    ssize_t retval;
+    printk(KERN_INFO "simple_buffer_read!\n");
+    if (*ofs > 0) {
+        return 0;
+    }
+    retval = cur_len;
+	memory_buffer = (void *)led_flag[2];
+    if (copy_to_user(buf, memory_buffer, retval)) {
+        retval = -EFAULT;
+        return retval;
+    }
+    printk(KERN_INFO "drv_buffer_read: [%zu bytes read]\n", retval);
+    *ofs += retval;
+    return retval;
+}
 
-int sw[4] = {4,17,27,22};
-int led[4] = {23, 24, 25, 1};
+static int my_driver_open(struct inode *inode, struct file *file)
+{
+    printk(KERN_INFO "simple_buffer_open!\n");
+    memory_buffer = kmalloc(BUF_SIZE, GFP_KERNEL);
+    if (!memory_buffer) {
+        printk(KERN_ERR "Error: allocating memory for the buffer\n");
+        return -ENOMEM;
+    }
+    memset(memory_buffer, 0, BUF_SIZE);
+    return 0;
+}
 
-int mode1_flag = 0; // mode1 led flag
-int led_number; // mode2 led flag
-int mode3_flags; // mode3 flags
-//int mode2_flag[4];
-int led_flag[4]; // mode flag 어떤 모드가 켜져있나?
+static int my_driver_release(struct inode *inode, struct file *file)
+{
+    printk(KERN_INFO "simple_buffer_release!\n");
+    if (memory_buffer) {
+        kfree(memory_buffer);
+    }
+    return 0;
+}
 
-static struct timer_list timer;
+static int my_driver_init(void)
+{
+    printk(KERN_INFO "my_driver_init!\n");
+    if (register_chrdev(DEV_MAJOR_NUMBER, DRIVER_NAME, &my_driver_fops) < 0) {
+        printk(KERN_ERR "driver_exam register failed!\n");
+        return -1;
+    }
+    return 0;
+}
 
-irqreturn_t irq_handler(int irq, void *dev_id);
-static int is_on_led_flag(void);
+static void my_driver_exit(void)
+{
+    printk(KERN_INFO "my_driver_exit!\n");
+    unregister_chrdev(DEV_MAJOR_NUMBER, DRIVER_NAME);
+}
 
-// mode1 func
-static void timer_cb_mode1(struct timer_list *timer);
-static int timer_module_init_mode1(void);
-static void module_led_mode_1(void);
-
-// mode2 func
-static void timer_cb_mode2(struct timer_list *timer);
-static int timer_module_init_mode2(void);
-static void module_led_mode_2(void);
-
-// mode3 func
-static void on_off_led_mode_3(short idx);
-static void module_led_mode_3(void);
-
-// mode4 func (reset mode)
-static void module_led_mode_4(void);
 
 // util
 int is_on_led_flag(void)
@@ -100,8 +127,8 @@ static void module_led_mode_1(void)
 	if (is_on_led_flag())
 		return;
 
+    int ret = 0, i = 0;
 	led_flag[0] = 1;
-    int ret, i;
     if(mode1_flag == 0){
 		for(i=0;i<4;i++){
 			ret = gpio_direction_output(led[i], HIGH);
@@ -153,8 +180,17 @@ static void module_led_mode_2(void)
 
 #pragma region module_led_mode_3
 
+// static void user_module_led_mode_3(void) 
+// {
+// 	if (is_on_led_flag())
+// 		return;
+// 	led_flag[2] = 1;
+// }
+
 static void on_off_led_mode_3(short idx)
 {
+	int ret;
+
 	switch(idx)
 	{
 		case 1:
@@ -232,12 +268,61 @@ static void module_led_mode_4(void)
 
 #pragma endregion
 
+// user interface handler : 유저가 입력한 값을 여기서 처리
+static void user_interface_handler(void)
+{
+	char mode = *((char*)memory_buffer);
+	printk("mode : %c\n", mode);
+
+	if (led_flag[2] == 0)
+	{
+		switch(mode){
+			case '1':
+				printk(KERN_INFO "sw1 interrupt ocurred!\n");
+				module_led_mode_1();
+				break;
+			case '2':
+				printk(KERN_INFO "sw2 interrupt ocurred!\n");
+				module_led_mode_2();
+				break;
+			case '3':
+				printk(KERN_INFO "sw3 interrupt ocurred!\n");
+				module_led_mode_3();
+				break;
+			case '4':
+				printk(KERN_INFO "sw4 interrupt ocurred!\n");
+				module_led_mode_4();
+				break;
+		}
+	}
+	else
+	{
+		switch(mode){
+			case '1':
+				printk(KERN_INFO "sw1 interrupt ocurred!\n");
+				on_off_led_mode_3(1);
+				break;
+			case '2':
+				printk(KERN_INFO "sw2 interrupt ocurred!\n");
+				on_off_led_mode_3(2);
+				break;
+			case '3':
+				printk(KERN_INFO "sw3 interrupt ocurred!\n");
+				on_off_led_mode_3(3);
+				break;
+			case '4':
+				printk(KERN_INFO "sw4 interrupt ocurred!\n");
+				module_led_mode_4();
+				break;
+		}
+	}
+}
 
 irqreturn_t irq_handler(int irq, void *dev_id)
 {
 	printk(KERN_INFO "Debug %d\n", irq);
 
-	if (led_flag[2] == 0)
+	if (led_flag[2] == 0) // 3번 모드가 켜져있지 않을 때
 	{
 		switch(irq){
 			case 60:
@@ -261,8 +346,6 @@ irqreturn_t irq_handler(int irq, void *dev_id)
 	
 	else
 	{
-		int ret;
-
 		switch(irq){
 			case 60:
 				printk(KERN_INFO "sw1 interrupt ocurred!\n");
@@ -287,6 +370,8 @@ irqreturn_t irq_handler(int irq, void *dev_id)
 
 static int switch_interrupt_init(void){
 	int res,i;
+
+	my_driver_init(); // driver init
 	printk(KERN_INFO "switch_interrupt_init!\n");
 	for(i=0;i<4;i++){
 		res = gpio_request(sw[i],"sw");
@@ -294,11 +379,15 @@ static int switch_interrupt_init(void){
 		if(res<0)
 			printk(KERN_INFO "request_irq failed!\n");
 	}
+
+
 	return 0;
 }
 
 static void switch_interrupt_exit(void){
 	int i;
+
+	my_driver_exit(); // driver exit
 	printk(KERN_INFO "switch_interrupt_exit!\n");
 	del_timer(&timer);
 	for(i=0;i<4;i++){
@@ -307,8 +396,6 @@ static void switch_interrupt_exit(void){
 		gpio_free(led[i]);
 	}
 }
-
-
 
 module_init(switch_interrupt_init);
 module_exit(switch_interrupt_exit);

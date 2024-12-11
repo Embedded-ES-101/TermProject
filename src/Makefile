@@ -8,6 +8,7 @@ MAIN_INC	= $(foreach D, $(INCS_DIR), -I$(D))
 
 SRCS_DIR 	= .
 SRCS		= 	client.c\
+				banner.c\
 
 OBJS		= $(SRCS:.c=.o)
 
@@ -18,7 +19,7 @@ _CLEAR		= \033[0K\r\c
 _OK			= [\033[32mOK\033[0m]
 
 %.o			: %.cpp
-			@echo "[..] $(NAME_SHORT)... compiling $*.cpp\r\c"
+			@echo "[..] $(NAME_SHORT)... compiling $*.c\r\c"
 			@$(CC) $(MAIN_INC) -c $< -o $@
 			@echo "$(_CLEAR)"
 
@@ -29,7 +30,7 @@ $(NAME)		: $(OBJS) $(INCS)
 			@echo "$(_OK) $(NAME_SHORT) compiled"
 
 clean		:
-			@$(RM) $(OBJS)
+			@$(RM) 
 
 fclean		: clean
 			@$(RM) $(NAME)
